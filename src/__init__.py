@@ -801,7 +801,16 @@ Type 'e' to open emacs or 'V' to open vim to %s: %s" %
                 # at this point either:
                 #  the php instance died
                 #  select timed out
+
+                # read till the end of the file
                 l = self.comm_file.readline()
+                lastline = l
+                while l.strip() != "":
+                    l = self.comm_file.readline()
+                    if l.strip() != "":
+                        lastline = l
+                l = lastline
+
                 if l.startswith("child"):
                     ret_code = self.p.poll()
                     os.kill(self.p.pid, signal.SIGHUP)
@@ -948,7 +957,8 @@ Type 'e' to open emacs or 'V' to open vim to %s: %s" %
         # extract function name and optional leading "=" from line
         if funcall.startswith("return "):
             funcall = funcall[6:].lstrip()
-        m = re.compile(" *([A-Za-z_][A-Za-z0-9_]*) *[(]").match(funcall)
+
+        m = re.compile(" *([A-Za-z_][A-Za-z0-9_:>-]*) *[(]").match(funcall)
         if not m:
             self.print_error("Invalid function call syntax")
             return False
