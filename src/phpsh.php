@@ -1,4 +1,4 @@
-#!/usr/bin/env php
+#!/usr/bin/env php5.3
 <?php
 // Copyright 2004-2007 Facebook. All Rights Reserved.
 // this is used by phpsh.py to exec php commands and maintain state
@@ -148,11 +148,12 @@ if (!function_exists('___phpsh___pretty_print')) {
         $arr_lines,
         array($depth_str.')')
       ));
-    case 'o':
-      ___phpsh___parse_dump_assert($dump, $pos, 'object');
-      $obj_type_str = ___phpsh___parse_dump_delim_grab($dump, $pos);
+
+      case 'c':
+      ___phpsh___parse_dump_assert($dump, $pos, 'class');
+      $obj_type_str = ___phpsh___parse_dump_delim_grab($dump, $pos, false, " #");
       $obj_num_str =
-        ___phpsh___parse_dump_delim_grab($dump, $pos, false, '# ');
+        ___phpsh___parse_dump_until($dump, $pos, false, ' ');
       $obj_len = (int)___phpsh___parse_dump_delim_grab($dump, $pos);
       ___phpsh___parse_dump_assert($dump, $pos, " {\n");
       $obj_lines = ___phpsh___parse_dump_obj_lines($x, $dump, $pos, $obj_len,
@@ -177,6 +178,9 @@ if (!function_exists('___phpsh___pretty_print')) {
     case 'f':
       ___phpsh___parse_dump_assert($dump, $pos, 'float');
       return ___phpsh___parse_dump_delim_grab($dump, $pos, $normal_end_check);
+    case 'd':
+      ___phpsh___parse_dump_assert($dump, $pos, 'double');
+      return ___phpsh___parse_dump_delim_grab($dump, $pos, $normal_end_check);
     case 'i':
       ___phpsh___parse_dump_assert($dump, $pos, 'int');
       return ___phpsh___parse_dump_delim_grab($dump, $pos, $normal_end_check);
@@ -191,8 +195,15 @@ if (!function_exists('___phpsh___pretty_print')) {
       ___phpsh___parse_dump_assert($dump, $pos, 'string');
       $str_len = (int)___phpsh___parse_dump_delim_grab($dump, $pos);
       ___phpsh___parse_dump_assert($dump, $pos, ' "');
-      $str = substr($dump, $pos, $str_len);
-      $pos += $str_len;
+      $str = "";
+      for (;$str_len>0;) {
+        $_str = substr($dump, $pos, $str_len);
+        $_str = stripcslashes($_str);
+        $str .= $_str;
+        $pos += $str_len;
+        $str_len -= strlen($_str);
+//        echo "str: $str\n";
+      }
       ___phpsh___parse_dump_assert($dump, $pos, '"', $normal_end_check);
       return ___phpsh___str_lit($str);
     default:
@@ -209,14 +220,14 @@ if (!function_exists('___phpsh___pretty_print')) {
     $arr_lines = array();
     foreach (array_keys($x) as $key) {
       if (is_int($key)) {
-        $key_str_php = (string)$key;
+        $key_str_php = "[".(string)$key."]";
         $key_str_correct = $key_str_php;
       } else {
-        $key_str_php = '"'.$key.'"';
+        $key_str_php = '\''.$key.'\'';
         $key_str_correct = ___phpsh___str_lit($key);
       }
-      ___phpsh___parse_dump_assert($dump, $pos, $depth_str.$indent_str.'['.
-        $key_str_php.']=>'."\n".$depth_str.$indent_str);
+      ___phpsh___parse_dump_assert($dump, $pos, $depth_str.$indent_str.''.
+        $key_str_php.' =>'."\n".$depth_str.$indent_str);
       if ($dump[$pos] == '*') {
         ___phpsh___parse_dump_assert($dump, $pos, '*RECURSION*');
         $val = '*RECURSION*';
@@ -228,19 +239,18 @@ if (!function_exists('___phpsh___pretty_print')) {
     }
     return $arr_lines;
   }
+
   function ___phpsh___parse_dump_obj_lines($x, $dump, &$pos, $arr_len, $depth,
       $depth_str, $indent_str) {
     $arr_lines = array();
     // this exposes private/protected members (a hack within a hack)
     $x_arr = ___phpsh___obj_to_arr($x);
     for ($i = 0; $i < $arr_len; $i++) {
-      ___phpsh___parse_dump_assert($dump, $pos, $depth_str.$indent_str.'[');
-      $key = ___phpsh___parse_dump_delim_grab($dump, $pos, false, '""');
-      if ($dump[$pos] == ':') {
-        $key .= ':'.___phpsh___parse_dump_delim_grab($dump, $pos, false, ':]');
-        $pos--;
-      }
-      ___phpsh___parse_dump_assert($dump, $pos, "]=>\n".$depth_str.$indent_str);
+      $visibility = ___phpsh___parse_dump_until($dump, $pos, false, " $");
+      $visibility = trim($visibility);
+      $key = ___phpsh___parse_dump_delim_grab($dump, $pos, false, '$ ');
+      $key .= ':'.$visibility;
+      ___phpsh___parse_dump_assert($dump, $pos, "=>\n".$depth_str.$indent_str);
       if ($dump[$pos] == '*') {
         ___phpsh___parse_dump_assert($dump, $pos, '*RECURSION*');
         $val = '*RECURSION*';
@@ -259,6 +269,7 @@ if (!function_exists('___phpsh___pretty_print')) {
     }
     return $arr_lines;
   }
+
   function ___phpsh___obj_to_arr($x) {
     if (is_object($x)) {
       $raw_array = (array)$x;
@@ -271,13 +282,14 @@ if (!function_exists('___phpsh___pretty_print')) {
     }
     return (array)$x;
   }
+
   function ___phpsh___parse_dump_assert($dump, &$pos, $str, $end=false) {
     $len = strlen($str);
     if ($str !== '' && substr($dump, $pos, $len) !== $str) {
       // todo; own exception type?
       throw new Exception(
         "parse error looking for '".$str."' at position ".$pos.
-        '; found instead: '.substr($dump, $pos));
+        '; found instead: |'.substr($dump, $pos)."|");
     }
     $pos += $len;
     if ($end && strlen($dump) > $pos) {
@@ -285,6 +297,20 @@ if (!function_exists('___phpsh___pretty_print')) {
     }
     return true;
   }
+
+  function ___phpsh___parse_dump_until($dump, &$pos, $end=false, $until=" ") {
+    $pos_end = strpos($dump, $until, $pos + 1);
+    $pos_dump_start = $pos;
+    if ($pos_end === false) {
+      throw new Exception("parse error execting '".$until."' after position ".$pos);
+    }
+    $pos = $pos_end + 1;
+    if ($end) {
+      ___phpsh___parse_dump_assert($dump, $pos, '', true);
+    }
+    return substr($dump, $pos_dump_start, $pos_end - $pos_dump_start);
+  }
+
   function ___phpsh___parse_dump_delim_grab($dump, &$pos, $end=false,
       $delims='()') {
     assert(strlen($delims) === 2);
@@ -302,6 +328,7 @@ if (!function_exists('___phpsh___pretty_print')) {
     return substr($dump, $pos_open_paren + 1,
       $pos_close_paren - $pos_open_paren - 1);
   }
+
   // this is provided for our in-house unit testing and in case it's useful to
   // anyone modifying the default pretty-printer
   function ___phpsh___assert_eq(&$i, $f, $x, $y) {
@@ -645,4 +672,3 @@ unset($___phpsh___do_autocomplete);
 unset($___phpsh___do_undefined_function_check);
 unset($___phpsh___fork_every_command);
 $___phpsh___->interactive_loop();
-
