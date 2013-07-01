@@ -1,4 +1,4 @@
-#!/usr/bin/env php5.3
+#!/usr/bin/env php
 <?php
 // Copyright 2004-2007 Facebook. All Rights Reserved.
 // this is used by phpsh.py to exec php commands and maintain state
